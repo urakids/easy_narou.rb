@@ -32,6 +32,82 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $managerLabel = 'local.narou-wslc.managed'
 
+function Get-WslExecutable {
+    $command = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    foreach ($candidate in @("$env:SystemRoot\Sysnative\wsl.exe", "$env:SystemRoot\System32\wsl.exe")) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    throw 'wsl.exe was not found. This script requires Windows with WSL installation support.'
+}
+
+function Get-WslPackageVersion {
+    param([string]$WslPath)
+    # Older inbox WSL does not support --version. Ignore its diagnostic output.
+    $ErrorActionPreference = 'Continue'
+    $output = (& $WslPath --version 2>$null | Out-String) -replace "`0", ''
+    if ($LASTEXITCODE -ne 0) { return $null }
+    # The first version is the WSL package version, not the kernel/distro version.
+    $match = [regex]::Match($output, '\d+\.\d+\.\d+(?:\.\d+)?')
+    if (-not $match.Success) { return $null }
+    return [version]$match.Value
+}
+
+function Get-WslcExecutable {
+    $command = Get-Command wslc.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    # The current PowerShell process may still have the PATH from before installation.
+    $candidate = Join-Path $env:ProgramFiles 'WSL\wslc.exe'
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+    return $null
+}
+
+function Invoke-WslSetup {
+    param([string]$WslPath, [string[]]$Arguments)
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    finally { $identity.Dispose() }
+    if ($isAdministrator) {
+        & $WslPath @Arguments | Out-Host
+        return $LASTEXITCODE
+    }
+    Write-Host 'Windows may request administrator approval (UAC) for WSL setup.'
+    # Elevate only WSL setup. Container operations continue under the original user.
+    $process = Start-Process -FilePath $WslPath -ArgumentList $Arguments -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+    try { return $process.ExitCode }
+    finally { $process.Dispose() }
+}
+
+function Ensure-Wsl3 {
+    $wslPath = Get-WslExecutable
+    $installedVersion = Get-WslPackageVersion -WslPath $wslPath
+    if ($null -ne $installedVersion -and $installedVersion -ge [version]'3.0.0' -and
+        $null -ne (Get-WslcExecutable)) { return }
+
+    if ($null -eq $installedVersion) {
+        Write-Host 'Installing WSL without a Linux distribution...'
+        $setupArguments = @('--install', '--no-distribution', '--web-download', '--no-launch')
+    }
+    else {
+        Write-Host "Updating WSL $installedVersion to the latest stable version..."
+        $setupArguments = @('--update', '--web-download')
+    }
+    $setupCode = Invoke-WslSetup -WslPath $wslPath -Arguments $setupArguments
+    if ($setupCode -in @(3010, 1641)) {
+        throw 'WSL setup requires a Windows restart. Restart Windows, then run narou.bat Start again.'
+    }
+    if ($setupCode -ne 0) { throw "WSL setup failed (exit code $setupCode)." }
+    $installedVersion = Get-WslPackageVersion -WslPath $wslPath
+    if ($null -eq $installedVersion -or $installedVersion -lt [version]'3.0.0' -or
+        $null -eq (Get-WslcExecutable)) {
+        throw 'WSL 3.0+ is not ready after setup. Restart Windows and run this script again; if it persists, check wsl --version.'
+    }
+    Write-Host "WSL $installedVersion is ready. Continuing..."
+}
+
 function Invoke-Wslc {
     param([string[]]$Arguments)
     & $script:wslcPath @Arguments
@@ -348,14 +424,12 @@ function Sync-NortonCertificate {
 }
 
 try {
+    Ensure-Wsl3
     if ([string]::IsNullOrWhiteSpace($DataDir)) {
         $DataDir = Join-Path $PSScriptRoot 'novel'
     }
-    $wslcCommand = Get-Command wslc.exe -ErrorAction SilentlyContinue
-    if ($null -eq $wslcCommand) {
-        throw 'wslc.exe was not found. Install/update WSL with: wsl --update'
-    }
-    $script:wslcPath = $wslcCommand.Source
+    $script:wslcPath = Get-WslcExecutable
+    if ($null -eq $script:wslcPath) { throw 'wslc.exe is unavailable after WSL setup.' }
 
     if ($Action -eq 'Fetch') {
         Fetch-NarouImage

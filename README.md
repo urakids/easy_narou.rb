@@ -7,6 +7,19 @@ Pythonや外部のtarコマンドも不要です。
 起動・取得・検証・tar作成はすべて `narou.ps1` 1ファイルに含まれます。
 `narou.bat` はそのスクリプトを呼び出すダブルクリック用の補助ファイルです。
 
+実行の最初にWSLパッケージのバージョンと `wslc.exe` を確認します。
+WSLが未導入（従来のWindows組み込み版を含む）の場合は
+`wsl --install --no-distribution --web-download --no-launch`、
+3.0未満またはwslcがない場合は `wsl --update --web-download` を自動実行します。
+安定版の最新WSLを取得し、3.0以上とwslcを確認できれば続行します。
+WSL 3.0以上とwslcが揃っている場合はインストール・更新を行いません。
+ここでいう3.0はWSLパッケージのバージョンです。
+
+セットアップ時だけWindowsのUAC確認が表示される場合があります。
+承認後もコンテナー操作は元のユーザーで続行します。
+再起動が必要な場合は案内を表示して終了します。Windowsを再起動してから再実行してください。
+スクリプトはWindowsを自動再起動しません。
+
 ## 起動
 
 `narou.bat` をダブルクリックするか、このフォルダーで以下を実行します。
@@ -148,10 +161,14 @@ NortonのルートCA追加後、Rubyによる `ncode.syosetu.com` への接続�
 `get_latest_table_of_contents` で小説名と662話の目次を取得・解析できました。
 この検証では本文全話の取得やEPUB変換は実行していません。
 PowerShellの構文チェック、および模擬呼び出しによる無関係なコンテナーの保護・データを残す削除の確認も完了しています。
+WSL事前チェックはWindows PowerShell 5.1で実際の3.0.1を認識できることを確認しました。
+未導入・旧版・wslc欠落・再起動要求・失敗時の分岐は模擬確認済みです。
+このPCは導入済みのため、実際の新規インストールや更新は実行していません。
 
 ## 参照
 
 - 公開イメージと起動設定: <https://hub.docker.com/r/kokotaro/narou>
 - イメージ作者によるDockerfile・初期化処理の説明: <https://qiita.com/kokotaro%40github/items/5c8da7281407b7484507>
 - WSL 3.0.1: <https://github.com/microsoft/WSL/releases/tag/3.0.1>
+- WSLのインストール・更新コマンド: <https://learn.microsoft.com/en-us/windows/wsl/basic-commands>
 - Registry HTTP API: <https://distribution.github.io/distribution/spec/api/>
